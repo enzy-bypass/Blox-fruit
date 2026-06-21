@@ -1,9 +1,21 @@
--- [[ TẢI THƯ VIỆN ORION UI CẤP CAO ]]
+-- [[ ZUS-HUB 水果框架 | GLOBAL CLIENT PRODUCTION VERSION ]]
+
+-- Ngăn chặn trùng lặp UI khi chạy lại script (Anti Re-execution)
+if _G.ZusHubExecuted then
+    pcall(function()
+        local coreGui = game:GetService("CoreGui")
+        if coreGui:FindFirstChild("Orion") then
+            coreGui.Orion:Destroy()
+        end
+    end)
+end
+_G.ZusHubExecuted = true
+
 local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
 
--- [[ HỆ THỐNG CẤU HÌNH ZUS-HUB ]]
-local ZusHub = {
-    Version = "Premium VIP v2.5",
+-- Cấu hình hệ thống toàn cục (Global Environment)
+getgenv().ZusHub = {
+    Version = "Premium VIP v2.6 (Global)",
     Settings = {
         AutoFarmFruit = false,
         FruitESP = false,
@@ -12,44 +24,45 @@ local ZusHub = {
     }
 }
 
--- Định nghĩa dịch vụ hệ thống
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
 local LocalPlayer = Players.LocalPlayer
 
-----------------------------------------------------------------
--- 1. BACKEND LOGIC (Tối ưu hóa, No Lag, Tween Siêu Mượt)
-----------------------------------------------------------------
-local function InitializeAntiBan()
-    local gmt = getrawmetatable(game)
-    if gmt and setreadonly then
-        setreadonly(gmt, false)
-        local oldNamecall = gmt.__namecall
-        gmt.__namecall = newcclosure(function(self, ...)
+-- [[ HỆ THỐNG BẢO VỆ TOÀN DIỆN CLIENT ]]
+local function InitiateAntiBan()
+    if not getgenv().ZusHub.Settings.AntiBanActive then return end
+    if hookmetamethod and checkcaller then
+        local oldNamecall; oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
             local method = getnamecallmethod()
-            if method == "Kick" or method == "Crash" then return nil end
+            if not checkcaller() and (method == "Kick" or method == "kick" or method == "Crash") then
+                return nil
+            end
             return oldNamecall(self, ...)
-        end)
-        setreadonly(gmt, true)
+        end))
     end
 end
 
+-- [[ BỘ QUÉT DỮ LIỆU BUFFER CHỐNG LAG ]]
 local DataAnalyzer = {}
-function DataAnalyzer:GetFruits()
-    local list = {}
-    for _, obj in ipairs(Workspace:GetChildren()) do
+function DataAnalyzer:GetServerFruits()
+    local detectedFruits = {}
+    local children = Workspace:GetChildren()
+    for i = 1, #children do
+        local obj = children[i]
         if obj:IsA("Tool") and (obj.Name:find("Fruit") or obj.Name:find("Trái")) then
-            table.insert(list, obj)
+            table.insert(detectedFruits, obj)
         end
     end
-    return list
+    return detectedFruits
 end
 
+-- [[ TWEEN CHUYỂN ĐỘNG - TỰ ĐỘNG CẬP NHẬT KHI LUÂN CHUYỂN NHÂN VẬT ]]
 local function SmoothTween(targetCFrame, speed)
-    local character = LocalPlayer.Character
-    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local rootPart = character:WaitForChild("HumanoidRootPart", 10)
     if not rootPart then return end
     
     local distance = (rootPart.Position - targetCFrame.Position).Magnitude
@@ -60,9 +73,10 @@ local function SmoothTween(targetCFrame, speed)
     
     local connection
     connection = RunService.Heartbeat:Connect(function()
-        if not ZusHub.Settings.AutoFarmFruit then
+        -- Kiểm tra nếu tắt tính năng hoặc nhân vật bị chết/đổi trạng thái thì hủy tween ngay lập tức
+        if not getgenv().ZusHub.Settings.AutoFarmFruit or not rootPart.Parent or not character:FindFirstChild("Humanoid") or character.Humanoid.Health <= 0 then
             tween:Cancel()
-            connection:Disconnect()
+            if connection then connection:Disconnect() end
         end
     end)
     
@@ -71,49 +85,58 @@ local function SmoothTween(targetCFrame, speed)
     if connection then connection:Disconnect() end
 end
 
+-- [[ VÒNG LẶP AUTO FARM TOÀN CLIENT ]]
 local function StartFruitFarm()
     task.spawn(function()
-        while ZusHub.Settings.AutoFarmFruit do
-            local fruits = DataAnalyzer:GetFruits()
-            if #fruits > 0 then
-                for _, fruit in ipairs(fruits) do
-                    if not ZusHub.Settings.AutoFarmFruit then break end
-                    if fruit and fruit.Parent == Workspace then
-                        -- Bay mượt tới trái ác quỷ với tốc độ 300 (Không bị văng)
-                        SmoothTween(fruit:GetPivot(), 300)
-                        task.wait(0.2)
+        while getgenv().ZusHub.Settings.AutoFarmFruit do
+            local character = LocalPlayer.Character
+            if character and character:FindFirstChild("Humanoid") and character.Humanoid.Health > 0 then
+                local fruits = DataAnalyzer:GetServerFruits()
+                if #fruits > 0 then
+                    for i = 1, #fruits do
+                        local fruit = fruits[i]
+                        if not getgenv().ZusHub.Settings.AutoFarmFruit then break end
+                        if fruit and fruit.Parent == Workspace and fruit:FindFirstChild("Handle") then
+                            SmoothTween(fruit:GetPivot(), 300)
+                            task.wait(0.1)
+                        end
                     end
+                else
+                    task.wait(0.5)
                 end
             else
-                task.wait(1) -- Không có trái, ngủ 1 giây tiết kiệm CPU (No Lag)
+                -- Chờ nhân vật hồi sinh hoàn toàn nếu bị chết (Chống gãy script)
+                task.wait(1)
             end
             task.wait(0.1)
         end
     end)
 end
 
+-- [[ HỆ THỐNG VISUALS / GLOBAL ESP FRUIT ]]
 local function ApplyFruitESP(fruit)
     if not fruit:FindFirstChild("ZusESP") then
         local billboard = Instance.new("BillboardGui", fruit)
         billboard.Name = "ZusESP"
         billboard.AlwaysOnTop = true
-        billboard.Size = UDim2.new(0, 150, 0, 40)
+        billboard.Size = UDim2.new(0, 160, 0, 40)
         
         local textLabel = Instance.new("TextLabel", billboard)
         textLabel.Size = UDim2.new(1, 0, 1, 0)
         textLabel.BackgroundTransparency = 1
-        textLabel.TextColor3 = Color3.fromRGB(0, 255, 128) -- Màu xanh Neon VIP
+        textLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
         textLabel.TextSize = 13
         textLabel.Font = Enum.Font.GothamBold
-        textLabel.Text = "🌟 " .. fruit.Name
+        textLabel.Text = "🔮 " .. fruit.Name
     end
 end
 
 local function StartFruitESP()
     task.spawn(function()
-        while ZusHub.Settings.FruitESP do
-            local fruits = DataAnalyzer:GetFruits()
-            for _, fruit in ipairs(fruits) do
+        while getgenv().ZusHub.Settings.FruitESP do
+            local fruits = DataAnalyzer:GetServerFruits()
+            for i = 1, #fruits do
+                local fruit = fruits[i]
                 if fruit.Parent == Workspace then
                     ApplyFruitESP(fruit)
                 end
@@ -123,20 +146,28 @@ local function StartFruitESP()
     end)
 end
 
-----------------------------------------------------------------
--- 2. KHỞI TẠO GIAO DIỆN ORION UI PREMIUM
-----------------------------------------------------------------
-InitializeAntiBan()
+local function RemoveFruitESP()
+    local fruits = DataAnalyzer:GetServerFruits()
+    for i = 1, #fruits do
+        local fruit = fruits[i]
+        if fruit:FindFirstChild("ZusESP") then
+            fruit.ZusESP:Destroy()
+        end
+    end
+end
+
+-- [[ KHỞI TẠO MENU PREMIUM VIP (ORION UI) ]]
+InitiateAntiBan()
 
 local Window = OrionLib:MakeWindow({
     Name = "Zus-hub | 水果框架 (Premium VIP)", 
     HidePremium = false, 
     SaveConfig = true, 
-    ConfigFolder = "ZusHubBloxFruit",
+    ConfigFolder = "ZusHub_Global_BloxFruits",
     IntroText = "Zus-hub Premium Loading..."
 })
 
--- [[ TAB 1: CHỨC NĂNG FARM ]]
+-- TAB: TỰ ĐỘNG FARM
 local FarmTab = Window:MakeTab({
     Name = "Auto Farm Fruit",
     Icon = "rbxassetid://4483345998",
@@ -149,23 +180,22 @@ FarmTab:AddToggle({
     Name = "Tự động Farm Fruit (Tween Mượt)",
     Default = false,
     Callback = function(Value)
-        ZusHub.Settings.AutoFarmFruit = Value
+        getgenv().ZusHub.Settings.AutoFarmFruit = Value
         if Value then
-            OrionLib:MakeNotification({Name = "Zus-hub", Content = "Đã bật Auto Farm Fruit!", Image = "rbxassetid://4483345998", Time = 3})
             StartFruitFarm()
         end
     end
 })
 
 FarmTab:AddToggle({
-    Name = "Kích hoạt Quét Siêu Nhanh (Fast Scan)",
+    Name = "Quét Siêu Nhanh (Fast Scan)",
     Default = true,
     Callback = function(Value)
-        ZusHub.Settings.FastScan = Value
+        getgenv().ZusHub.Settings.FastScan = Value
     end
 })
 
--- [[ TAB 2: TRỰC QUAN & ESP ]]
+-- TAB: ĐỊNH VỊ (ESP)
 local VisualsTab = Window:MakeTab({
     Name = "Visuals / ESP",
     Icon = "rbxassetid://4483345998",
@@ -178,14 +208,16 @@ VisualsTab:AddToggle({
     Name = "Bật ESP Fruit Siêu Xịn",
     Default = false,
     Callback = function(Value)
-        ZusHub.Settings.FruitESP = Value
+        getgenv().ZusHub.Settings.FruitESP = Value
         if Value then
             StartFruitESP()
+        else
+            RemoveFruitESP()
         end
     end
 })
 
--- [[ TAB 3: PHÂN TÍCH DỮ LIỆU ]]
+-- TAB: THÔNG TIN SERVER
 local DataTab = Window:MakeTab({
     Name = "Server Info",
     Icon = "rbxassetid://4483345998",
@@ -194,22 +226,20 @@ local DataTab = Window:MakeTab({
 
 DataTab:AddSection({ Name = "📊 Hệ Thống Phân Tích Dữ Liệu Realtime" })
 
-local FruitCountLabel = DataTab:AddLabel("Trái ác quỷ hiện có: Đang quét...")
-local PingLabel = DataTab:AddLabel("Ping hiện tại: -- ms")
+local FruitCountLabel = DataTab:AddLabel("Trái ác quỷ hiện có: Đang tính toán...")
+local PingLabel = DataTab:AddLabel("Ping hệ thống: -- ms")
 
--- Vòng lặp cập nhật thông tin UI (Không gây delay game)
 task.spawn(function()
     while true do
         if Window then
-            local fruits = DataAnalyzer:GetFruits()
-            local pingValue = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
+            local fruits = DataAnalyzer:GetServerFruits()
+            local pV = Stats.Network.ServerStatsItem["Data Ping"]:GetValueString()
             
-            FruitCountLabel:Set("Trái ác quỷ hiện có trong Server: " .. tostring(#fruits))
-            PingLabel:Set("Độ trễ hệ thống (Ping): " .. string.sub(pingValue, 1, 5) .. " ms")
+            FruitCountLabel:Set("Trái ác quỷ trong Server: " .. tostring(#fruits))
+            PingLabel:Set("Độ trễ phản hồi (Ping): " .. string.sub(pV, 1, 5) .. " ms")
         end
-        task.wait(1)
+        task.wait(1.2)
     end
 end)
 
--- Kích hoạt Orion UI
 OrionLib:Init()
